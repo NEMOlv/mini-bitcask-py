@@ -24,6 +24,7 @@ class DataFile:
         return record
 
     def write(self, record):
+        self.file.seek(self.offset)
         self.file.write(record.encode())
         # 此处记录的是下一个记录的写入偏移
         self.offset = self.file.tell()

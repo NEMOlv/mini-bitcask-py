@@ -29,7 +29,9 @@ class MiniBitcask:
     def open(self):
         # 如果数据库目录不存在，则新建
         os.makedirs(self.dirPath, exist_ok=True)
-        self.dataFile = DataFile(open(os.path.join(self.dirPath,DataFileName), 'ab+'), 0)
+
+        datafile = os.path.join(self.dirPath, DataFileName)
+        self.dataFile = DataFile(open(datafile, 'ab+'), os.stat(datafile).st_size)
         self._load_indexes_from_file()
 
     def _load_indexes_from_file(self):
@@ -42,11 +44,11 @@ class MiniBitcask:
 
         offset = 0
         while True:
-            record = db.dataFile.read(offset)
+            record = self.dataFile.read(offset)
             if record is None:
                 break
-            db.indexes[record.key] = offset
-            if record.type == RecordType.DEL:
+            self.indexes[record.key] = offset
+            if record.type == RecordType.DEL.value:
                 # 删除内存中的key
                 self.indexes.pop(record.key)
             offset += record.getSize()
@@ -54,7 +56,7 @@ class MiniBitcask:
     def close(self):
         if self.dataFile is None:
             raise ValueError("数据库实例不存在")
-        db.dataFile.file.close()
+        self.dataFile.file.close()
 
     def get(self, key: str) -> string:
         """读取数据"""
@@ -63,7 +65,6 @@ class MiniBitcask:
 
         with self.mu:
             offset = self.indexes.get(key)
-            print(offset)
             if offset is None:
                 raise ValueError("Key not found")
             record = self.dataFile.read(offset)
@@ -72,7 +73,7 @@ class MiniBitcask:
 
     def put(self, key: str, value: str) -> bool:
         """写入数据"""
-        if len(key) == 0:
+        if key is None or len(key) == 0:
             return False
 
         with self.mu:
@@ -90,11 +91,12 @@ class MiniBitcask:
         return True
 
     def delete(self, key: str):
-        if len(key) == 0:
+        if key is None or len(key) == 0:
             return False
+
         with self.mu:
             if self.indexes.get(key) is None:
-                raise ValueError("Key not found")
+                return False
             record = Record(key, None, RecordType.DEL)
             # 写入磁盘
             self.dataFile.write(record)
@@ -102,10 +104,13 @@ class MiniBitcask:
             # 删除内存中的key
             self.indexes.pop(key)
 
+        return True
+
 # 使用示例
 if __name__ == "__main__":
     # 初始化数据库
-    db = MiniBitcask("D:\WorkSpace\PythonWS\mini-bitcask-py")
+    # D:\WorkSpace\PythonWS
+    db = MiniBitcask("data")
     # 打开数据库
     db.open()
 
@@ -114,8 +119,27 @@ if __name__ == "__main__":
     db.put("key2", "value2")
     db.put("key3", "value3")
 
-    # 读取数据
-    print(db.get("key1"))  # 输出: b'value1'
-    print(db.get("key2"))  # 输出: b'value2'
-    # 关闭数据库
+    print(db.get("key1"))
+    print(db.get("key2"))
+    print(db.get("key3"))
+
+    db.put("key1", "value100")
+    db.put("key2", "value200")
+    db.put("key3", "value300")
+
+    print(db.get("key1"))
+    print(db.get("key2"))
+
+    # 重启数据库
     db.close()
+    db.open()
+
+    print(db.get("key1"))
+    print(db.get("key2"))
+    print(db.get("key3"))
+
+    db.put("key3", "value308")
+    print(db.get("key3"))
+
+
+
