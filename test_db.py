@@ -1,6 +1,7 @@
 from unittest import TestCase
 
 from db import MiniBitcask
+from merge import merge
 
 
 class TestMiniBitcask(TestCase):
@@ -140,3 +141,18 @@ class TestMiniBitcask(TestCase):
             self.assertFalse(db.delete(f"key{i}"))
         for i in range(50,100):
             self.assertTrue(db.delete(f"key{i}"))
+    def test_merge(self):
+        db = MiniBitcask("data")
+        db.open()
+
+        # 初始化数据
+        for i in range(100):
+            db.put(f"key{i}", f"value{i}")
+
+        merge(db)
+        mergedb = MiniBitcask("merge")
+        mergedb.open()
+        for key in db.indexes.keys():
+            self.assertEqual(db.get(key),mergedb.get(key))
+        db.close()
+        mergedb.close()

@@ -2,11 +2,12 @@ import os
 import string
 from enum import Enum
 from threading import RLock
-from typing import Dict, Optional
+from typing import Dict
 from data_file import DataFile
 from record import Record
 
 DataFileName = "minibitcask.data"
+MergePathName = "merge"
 
 
 class RecordType(Enum):
@@ -47,11 +48,15 @@ class MiniBitcask:
             record = self.dataFile.read(offset)
             if record is None:
                 break
+
             self.indexes[record.key] = offset
+
             if record.type == RecordType.DEL.value:
                 # 删除内存中的key
                 self.indexes.pop(record.key)
+
             offset += record.getSize()
+
 
     def close(self):
         if self.dataFile is None:
@@ -106,40 +111,40 @@ class MiniBitcask:
 
         return True
 
+
 # 使用示例
 if __name__ == "__main__":
-    # 初始化数据库
-    # D:\WorkSpace\PythonWS
-    db = MiniBitcask("data")
-    # 打开数据库
-    db.open()
-
-    # 写入数据
-    db.put("key1", "value1")
-    db.put("key2", "value2")
-    db.put("key3", "value3")
-
-    print(db.get("key1"))
-    print(db.get("key2"))
-    print(db.get("key3"))
-
-    db.put("key1", "value100")
-    db.put("key2", "value200")
-    db.put("key3", "value300")
-
-    print(db.get("key1"))
-    print(db.get("key2"))
-
-    # 重启数据库
-    db.close()
-    db.open()
-
-    print(db.get("key1"))
-    print(db.get("key2"))
-    print(db.get("key3"))
-
-    db.put("key3", "value308")
-    print(db.get("key3"))
-
-
+    # # 初始化数据库
+    # # D:\WorkSpace\PythonWS
+    # db = MiniBitcask("data")
+    # # 打开数据库
+    # db.open()
+    #
+    # # 写入数据
+    # db.put("key1", "value1")
+    # db.put("key2", "value2")
+    # db.put("key3", "value3")
+    #
+    # print(db.get("key1"))
+    # print(db.get("key2"))
+    # print(db.get("key3"))
+    #
+    # db.put("key1", "value100")
+    # db.put("key2", "value200")
+    # db.put("key3", "value300")
+    #
+    # print(db.get("key1"))
+    # print(db.get("key2"))
+    #
+    # # 重启数据库
+    # db.close()
+    # db.open()
+    #
+    # print(db.get("key1"))
+    # print(db.get("key2"))
+    # print(db.get("key3"))
+    #
+    # db.put("key3", "value308")
+    # print(db.get("key3"))
+    pass
 
