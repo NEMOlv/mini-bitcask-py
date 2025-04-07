@@ -14,12 +14,12 @@ class DataFile:
             return None
         key = None
         value = None
-        keySize, valueSize, type = Record.decode(header)
+        keySize, valueSize, type, TxNo = Record.decode(header)
         if keySize > 0:
             key = self.file.read(keySize).decode()
         if valueSize > 0:
             value = self.file.read(valueSize).decode()
-        record = Record(key,value,type)
+        record = Record(key,value,type,TxNo)
         self.file.seek(0)
         return record
 

@@ -8,11 +8,14 @@ from record import Record
 
 DataFileName = "minibitcask.data"
 MergePathName = "merge"
-
+TxFinished = "TxFinished"
 
 class RecordType(Enum):
     PUT = 0
     DEL = 1
+    TxPUT = 2
+    TxDEL = 3
+    Mark = 4
 
 
 class MiniBitcask:
@@ -26,6 +29,8 @@ class MiniBitcask:
         self.dataFile: DataFile = None
         self.mu = RLock()  # 可重入锁
         self.indexes: Dict[str, int] = {}
+        self.batch = {}
+        self.TxNo = 1
 
     def open(self):
         # 如果数据库目录不存在，则新建
@@ -35,11 +40,15 @@ class MiniBitcask:
         self.dataFile = DataFile(open(datafile, 'ab+'), os.stat(datafile).st_size)
         self._load_indexes_from_file()
 
+    # todo:需要识别事务数据和非事务数据
     def _load_indexes_from_file(self):
         """
         从数据文件加载索引（需要实现具体解析逻辑）
         这里需要根据实际数据格式解析文件内容，重建内存索引
         """
+
+        batch = {}
+
         if self.dataFile is None:
             return
 
@@ -48,12 +57,20 @@ class MiniBitcask:
             record = self.dataFile.read(offset)
             if record is None:
                 break
+            if record.type in [RecordType.PUT.value, RecordType.DEL.value]:
+                self.indexes[record.key] = offset
 
-            self.indexes[record.key] = offset
+                if record.type == RecordType.DEL.value:
+                    # 删除内存中的key
+                    self.indexes.pop(record.key)
+            elif record.type in [RecordType.TxPUT.value, RecordType.TxDEL.value]:
+                if batch[record.TxNo] is None:
+                    batch[record.TxNo] = []
+                batch[record.TxNo].append((record.key,offset))
 
-            if record.type == RecordType.DEL.value:
-                # 删除内存中的key
-                self.indexes.pop(record.key)
+            if record.type == RecordType.Mark.value and record.key==TxFinished:
+                for key,pos in batch.pop(record.value):
+                    self.indexes[key] = pos
 
             offset += record.getSize()
 
@@ -76,11 +93,17 @@ class MiniBitcask:
 
         return record.value
 
-    def put(self, key: str, value: str) -> bool:
-        """写入数据"""
+    def put(self, key: str, value: str, TxNo=None) -> bool:
         if key is None or len(key) == 0:
             return False
 
+        if TxNo is None:
+            return self._PutOneRecord(key, value)
+        else:
+            return self._PutBatchRecord(key, value,TxNo)
+
+    def _PutOneRecord(self, key: str, value: str) -> bool:
+        """写入数据"""
         with self.mu:
             # 此处取出的这一次记录的写入偏移
             offset = self.dataFile.offset
@@ -93,6 +116,13 @@ class MiniBitcask:
             # 将offset写入内存
             self.indexes[key] = offset
 
+        return True
+
+    def _PutBatchRecord(self, key, value, TxNo):
+        if self.batch.get(TxNo) is None:
+            self.batch[TxNo] = []
+
+        self.batch[TxNo].append((key, value, RecordType.TxPUT))
         return True
 
     def delete(self, key: str):
@@ -110,6 +140,12 @@ class MiniBitcask:
             self.indexes.pop(key)
 
         return True
+
+    def startTx(self):
+        # 这里要加锁，保证版本号是串行递增的：
+        TxNo = self.TxNo
+        self.TxNo = self.TxNo + 1
+        return TxNo
 
 
 # 使用示例
