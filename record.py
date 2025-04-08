@@ -1,7 +1,14 @@
 import struct
+from enum import Enum
 
 HeaderSize = 16
 
+class RecordType(Enum):
+    PUT = 0
+    DEL = 1
+    TxPUT = 2
+    TxDEL = 3
+    Mark = 4
 
 class Record:
     def __init__(self, key, value, type, TxNo=0):
@@ -31,5 +38,5 @@ class Record:
 
     @classmethod
     def decode(cls, header):
-        keySize, valueSize, type = struct.unpack('> I I I I', header)
+        keySize, valueSize, type, TxNo = struct.unpack('> I I I I', header)
         return keySize, valueSize, type, TxNo

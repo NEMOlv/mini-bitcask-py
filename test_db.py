@@ -1,3 +1,4 @@
+import os
 from unittest import TestCase
 
 from db import MiniBitcask
@@ -19,17 +20,18 @@ class TestMiniBitcask(TestCase):
         # 测试数据库索引是否正常
         if db.indexes == dict():
             # 如果是首次打开数据库
-            self.assertEqual(db.indexes,dict())
+            self.assertEqual(db.indexes, dict())
         else:
             # 不是首次打开数据库
             self.assertIsNotNone(db.indexes)
 
-
         # 测试数据库是否被正确关闭
         db.close()
-        self.assertRaises(ValueError, db.put, "key","value")
+        self.assertRaises(ValueError, db.put, "key", "value")
         self.assertRaises(ValueError, db.get, "key")
-        self.assertRaises(ValueError, db.delete, "key")
+        self.assertFalse(db.delete("key"))
+
+        # os.remove("data/minibitcask.data")
 
     def test_put(self):
         db = MiniBitcask("data")
@@ -40,21 +42,21 @@ class TestMiniBitcask(TestCase):
         for i in range(100):
             db.put(f"key{i}", f"value{i}")
         for i in range(100):
-            self.assertEqual(f"value{i}",db.get(f"key{i}"))
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
 
         # PUT相同key
         for i in range(100):
             db.put(f"key{i}", f"value{i}00")
         for i in range(100):
-            self.assertEqual(f"value{i}00",db.get(f"key{i}"))
+            self.assertEqual(f"value{i}00", db.get(f"key{i}"))
 
         # PUT 空key
-        self.assertFalse(db.put(None,"value None"))
-        self.assertFalse(db.put('',"value None"))
+        self.assertFalse(db.put(None, "value None"))
+        self.assertFalse(db.put('', "value None"))
 
         # PUT 空value
-        self.assertTrue(db.put("value-None",None))
-        self.assertTrue(db.put("value-''",''))
+        self.assertTrue(db.put("value-None", None))
+        self.assertTrue(db.put("value-''", ''))
 
         # 重启数据库
         db.close()
@@ -65,9 +67,10 @@ class TestMiniBitcask(TestCase):
         for i in range(200):
             db.put(f"key{i}", f"value{i}")
         for i in range(200):
-            self.assertEqual(f"value{i}",db.get(f"key{i}"))
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
 
-
+        db.close()
+        os.remove("data/minibitcask.data")
 
     def test_get(self):
         db = MiniBitcask("data")
@@ -80,34 +83,35 @@ class TestMiniBitcask(TestCase):
 
         # GET 数据
         for i in range(100):
-            self.assertEqual(f"value{i}",db.get(f"key{i}"))
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
 
         # 重新PUT数据后GET数据
         for i in range(100):
             db.put(f"key{i}", f"value{i}00")
         for i in range(100):
-            self.assertEqual(f"value{i}00",db.get(f"key{i}"))
+            self.assertEqual(f"value{i}00", db.get(f"key{i}"))
 
         # GET不存在的数据
         for i in range(100):
-            self.assertRaises(ValueError,db.get,f"key{i}00")
+            self.assertRaises(ValueError, db.get, f"key{i}00")
 
         # DELETE数据后GET数据
         for i in range(50):
             db.delete(f"key{i}")
         for i in range(50):
-            self.assertRaises(ValueError,db.get,f"key{i}")
-        for i in range(50,100):
-            self.assertEqual(f"value{i}00",db.get(f"key{i}"))
+            self.assertRaises(ValueError, db.get, f"key{i}")
+        for i in range(50, 100):
+            self.assertEqual(f"value{i}00", db.get(f"key{i}"))
 
         # 重启后GET数据
         db.close()
         db.open()
 
-        for i in range(50,100):
+        for i in range(50, 100):
             self.assertEqual(f"value{i}00", db.get(f"key{i}"))
 
         db.close()
+        os.remove("data/minibitcask.data")
 
     def test_delete(self):
         db = MiniBitcask("data")
@@ -139,8 +143,12 @@ class TestMiniBitcask(TestCase):
 
         for i in range(50):
             self.assertFalse(db.delete(f"key{i}"))
-        for i in range(50,100):
+        for i in range(50, 100):
             self.assertTrue(db.delete(f"key{i}"))
+
+        db.close()
+        os.remove("data/minibitcask.data")
+
     def test_merge(self):
         db = MiniBitcask("data")
         db.open()
@@ -149,10 +157,117 @@ class TestMiniBitcask(TestCase):
         for i in range(100):
             db.put(f"key{i}", f"value{i}")
 
-        merge(db)
-        mergedb = MiniBitcask("merge")
+        merge(db, "data")
+        mergedb = MiniBitcask("data-merge")
         mergedb.open()
         for key in db.indexes.keys():
-            self.assertEqual(db.get(key),mergedb.get(key))
+            self.assertEqual(db.get(key), mergedb.get(key))
         db.close()
         mergedb.close()
+
+    def test_transaction(self):
+        db = MiniBitcask("data")
+        db.open()
+
+        # 1、批量写入数据
+        Tx = db.start_Tx()
+        # 1.1 未提交情况
+        for i in range(100):
+            Tx.put(f"key{i}", f"value{i}")
+            self.assertRaises(ValueError, db.get, f"key{i}")
+        # 1.2 提交情况
+        Tx.commit()
+        for i in range(100):
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+
+        # 2、批量删除数据
+        Tx = db.start_Tx()
+        # 2.1 未提交情况
+        for i in range(100):
+            Tx.delete(f"key{i}")
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+        # 2.2 提交情况
+        Tx.commit()
+        for i in range(100):
+            self.assertRaises(ValueError, db.get, f"key{i}")
+
+        # 3、批量写入和删除数据
+        Tx = db.start_Tx()
+        # 3.0 初始化数据
+        for i in range(50, 100):
+            db.put(f"key{i}", f"value{i}")
+        # 3.1 未提交情况
+        for i in range(50):
+            Tx.put(f"key{i}", f"value{i}")
+            self.assertRaises(ValueError, db.get, f"key{i}")
+        for i in range(50, 100):
+            Tx.delete(f"key{i}")
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+        # 3.2 提交情况
+        Tx.commit()
+        for i in range(50):
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+        for i in range(50, 100):
+            self.assertRaises(ValueError, db.get, f"key{i}")
+
+        # 重启
+        db.close()
+        db.open()
+
+        # 4、重启后查询
+        for i in range(50):
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+        for i in range(50, 100):
+            self.assertRaises(ValueError, db.get, f"key{i}")
+
+        # 5、重启后批量写入数据
+        Tx = db.start_Tx()
+        # 5.1 未提交情况
+        for i in range(100, 200):
+            Tx.put(f"key{i}", f"value{i}")
+            self.assertRaises(ValueError, db.get, f"key{i}")
+        # 5.2 提交情况
+        Tx.commit()
+        for i in range(100, 200):
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+
+        # 6、重启后批量删除数据
+        Tx = db.start_Tx()
+        # 6.1 未提交情况
+        for i in range(100, 200):
+            Tx.delete(f"key{i}")
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+        # 6.2 提交情况
+        Tx.commit()
+        for i in range(100, 200):
+            self.assertRaises(ValueError, db.get, f"key{i}")
+
+        # 7、重启后批量写入和删除数据
+        Tx = db.start_Tx()
+        # 7.0 初始化数据
+        for i in range(150, 200):
+            db.put(f"key{i}", f"value{i}")
+        # 7.1 未提交情况
+        for i in range(100, 150):
+            Tx.put(f"key{i}", f"value{i}")
+            self.assertRaises(ValueError, db.get, f"key{i}")
+        for i in range(150, 200):
+            Tx.delete(f"key{i}")
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+        # 7.2 提交情况
+        Tx.commit()
+        for i in range(100, 150):
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+        for i in range(150, 200):
+            self.assertRaises(ValueError, db.get, f"key{i}")
+
+        # 8.自动提交或回滚
+        with db.start_Tx() as Tx:
+            for i in range(500, 1000):
+                Tx.put(f"key{i}", f"value{i}")
+        for i in range(500, 1000):
+            self.assertEqual(f"value{i}", db.get(f"key{i}"))
+
+        # 关闭
+        db.close()
+        os.remove("data/minibitcask.data")
