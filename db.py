@@ -1,10 +1,10 @@
-
 import os
 import string
+from enum import Enum
 from lock import RWLock
 from typing import Dict
 from data_file import DataFile
-from record import RecordType, Record
+from record import Record, RecordType
 from transaction import Transaction
 from utils import delete_files
 
@@ -16,7 +16,7 @@ TxFinished = "TxFinished"
 
 
 class MiniBitcask:
-    def __init__(self, dir_path: str):
+    def __init__(self, dir_path: str, indexes):
         """
         初始化数据库实例
         :param dir_path: 数据库目录路径
@@ -24,9 +24,8 @@ class MiniBitcask:
         # 处理绝对路径
         self.dirPath = os.path.abspath(dir_path)
         self.dataFile: DataFile = None
-        # 读写锁
-        self.rw = RWLock()
-        self.indexes: Dict[str, int] = {}
+        self.rw = RWLock()  # 可重入锁
+        self.indexes = indexes
         self.batch = {}
         self.TxNo = 1
 
@@ -66,7 +65,6 @@ class MiniBitcask:
 
     def _load_datafile(self):
         datafile = os.path.join(self.dirPath, DataFileName)
-        # print(datafile)
         self.dataFile = DataFile(open(datafile, 'ab+'), os.stat(datafile).st_size)
 
     def _load_indexes_from_file(self):
@@ -86,21 +84,19 @@ class MiniBitcask:
             if record is None:
                 break
             if record.type in [RecordType.PUT.value, RecordType.DEL.value]:
-                self.indexes[record.key] = offset
+                self.indexes.put(record.key, offset)
                 if record.type == RecordType.DEL.value:
                     # 删除内存中的key
-                    self.indexes.pop(record.key)
+                    self.indexes.delete(record.key)
             elif record.type in [RecordType.TxPUT.value, RecordType.TxDEL.value]:
                 if batch.get(record.TxNo) is None:
                     batch[record.TxNo] = []
                 batch[record.TxNo].append((record.key, offset, record.type))
-
-
             if record.type == RecordType.Mark.value and record.key == TxFinished:
                 for key, pos, type in batch.pop(record.TxNo):
-                    self.indexes[key] = pos
-                    if type==RecordType.TxDEL.value:
-                        self.indexes.pop(key)
+                    self.indexes.put(key, pos)
+                    if type == RecordType.TxDEL.value:
+                        self.indexes.delete(key)
 
             offset += record.getSize()
 
@@ -108,11 +104,11 @@ class MiniBitcask:
         if self.dataFile is None:
             raise ValueError("数据库实例不存在")
         self.dataFile.file.close()
-        self.indexes.clear()
+        self.indexes.close()
 
     def get(self, key: str) -> string:
         """读取数据"""
-        if key is None or len(key) == 0:
+        if len(key) == 0:
             return None
 
         with self.rw.read_lock:
@@ -123,6 +119,28 @@ class MiniBitcask:
 
         return record.value
 
+
+    def append_one_record(self, key: str, value: str | None, type: Enum):
+        # 此处取出的这一次记录的写入偏移
+        offset = self.dataFile.offset
+
+        record = Record(key, value, type)
+
+        # 写入磁盘
+        self.dataFile.write(record)
+
+        # 将offset写入内存
+        self.indexes.put(key, offset)
+
+
+    def append_batch_record(self, key: str, value: str, TxNo: int, type: Enum):
+        if self.batch.get(TxNo) is None:
+            self.batch[TxNo] = []
+
+        self.batch[TxNo].append((key, value, type))
+        return True
+
+
     def put(self, key: str, value: str, TxNo=None) -> bool:
         if key is None or len(key) == 0:
             return False
@@ -132,6 +150,7 @@ class MiniBitcask:
         else:
             return self._put_batch_record(key, value, TxNo)
 
+
     def _put_one_record(self, key: str, value: str) -> bool:
         """写入数据"""
         with self.rw.write_lock:
@@ -139,11 +158,12 @@ class MiniBitcask:
 
         return True
 
-    def _put_batch_record(self, key, value, TxNo):
-        self.append_batch_record(key, value, TxNo, RecordType.TxPUT)
-        return True
 
-    def delete(self, key: str, TxNo=None) -> bool:
+    def _put_batch_record(self, key, value, TxNo):
+        return self.append_batch_record(key, value, TxNo, RecordType.TxPUT)
+
+
+    def delete(self, key: str, TxNo=None):
         if key is None or len(key) == 0:
             return False
 
@@ -155,35 +175,18 @@ class MiniBitcask:
         else:
             return self._delete_batch_record(key, TxNo)
 
+
     def _delete_one_record(self, key: str) -> bool:
         """写入数据"""
         with self.rw.write_lock:
             self.append_one_record(key, None, RecordType.DEL)
+            self.indexes.delete(key)
         return True
+
 
     def _delete_batch_record(self, key, TxNo):
-        self.append_batch_record(key, None, TxNo, RecordType.TxDEL)
-        return True
+        return self.append_batch_record(key, None, TxNo, RecordType.TxDEL)
 
-    def append_one_record(self,key, value, type):
-        # 此处取出的这一次记录的写入偏移
-        offset = self.dataFile.offset
-
-        record = Record(key, value, type)
-
-        # 写入磁盘
-        self.dataFile.write(record)
-        if type == RecordType.PUT:
-            # 将offset写入内存
-            self.indexes[key] = offset
-        elif type == RecordType.DEL:
-            self.indexes.pop(key)
-
-    def append_batch_record(self,key, value, TxNo, type):
-        if self.batch.get(TxNo) is None:
-            self.batch[TxNo] = []
-
-        self.batch[TxNo].append((key, value, type))
 
     def inc_TxNo(self):
         # 这里要加锁，保证版本号是串行递增的：
@@ -191,6 +194,8 @@ class MiniBitcask:
         self.TxNo = self.TxNo + 1
         return TxNo
 
+
     def start_Tx(self):
         return Transaction(self)
+
 

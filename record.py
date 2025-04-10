@@ -32,11 +32,14 @@ class Record:
     def encode(self):
         encKey = self.key.encode()
         encValue = self.value.encode() if self.value is not None else b''
-
+        record_type = self.type if type(self.type) == int else self.type.value
         return struct.pack("> I I I I {}s {}s".format(self.keySize, self.valueSize), self.keySize, self.valueSize,
-                           self.type.value, self.TxNo, encKey, encValue)
+                           record_type, self.TxNo, encKey, encValue)
 
     @classmethod
     def decode(cls, header):
         keySize, valueSize, type, TxNo = struct.unpack('> I I I I', header)
         return keySize, valueSize, type, TxNo
+
+    def __str__(self):
+        return f"(Key:{self.key},Value:{self.value},type:{self.type})"

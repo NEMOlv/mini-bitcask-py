@@ -35,16 +35,16 @@ class Transaction:
             for key, value, type in self.db.batch.pop(self.tx_no):
                 # 此处取出的这一次记录的写入偏移
                 offset = self.db.dataFile.offset
-                record = Record(key, value, type, self.tx_no)
+                record = Record(key, value, type ,self.tx_no)
                 # 写入磁盘
                 self.db.dataFile.write(record)
                 positions.append((key, offset, type))  # 示例位置
 
             # 更新内存索引
             for key, pos, type in positions:
-                self.db.indexes[key] = pos
+                self.db.indexes.put(key ,pos)
                 if type == RecordType.TxDEL:
-                    self.db.indexes.pop(key)
+                    self.db.indexes.delete(key)
 
             # 手动写入完成标识，避免维护内存索引导致出错
             record = Record("TxFinished", None, RecordType.Mark, self.tx_no)
